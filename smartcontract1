@@ -1,0 +1,111 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+contract CropInsurance {
+    enum CropType { Kharif, Rabi }
+
+    struct Farmer {
+        uint256 id;
+        string name;
+        address payable wallet;
+        bool insured;
+    }
+
+    struct Policy {
+        uint256 id;
+        uint256 farmerId;
+        uint256 coverageAmount;
+        uint256 premium;
+        uint256 startDate;
+        uint256 endDate;
+        bool active;
+        CropType cropType;
+    }
+
+    mapping(uint256 => Farmer) public farmers;
+    mapping(uint256 => Policy) public policies;
+    uint256 public farmerCount;
+    uint256 public policyCount;
+    address public insurer;
+
+    event PolicyPurchased(uint256 policyId, uint256 farmerId, uint256 coverageAmount, uint256 premium);
+    event ClaimPaid(uint256 policyId, uint256 farmerId, uint256 amount);
+
+    constructor() {
+        insurer = msg.sender;
+    }
+
+    modifier onlyInsurer() {
+        require(msg.sender == insurer, "Only the insurer can perform this action");
+        _;
+    }
+
+    modifier onlyFarmer(uint256 _farmerId) {
+        require(farmers[_farmerId].wallet == msg.sender, "Only the farmer can perform this action");
+        _;
+    }
+
+
+    receive() external payable {
+        // Function to receive Ether. msg.data must be empty.
+    }
+
+    fallback() external payable {
+        // Function to handle calls to the contract that do not match any function signature.
+    }
+
+    function addFarmer(string memory _name, address payable _wallet) public onlyInsurer {
+        farmerCount++;
+        farmers[farmerCount] = Farmer(farmerCount, _name, _wallet, false);
+    }
+
+    function calculatePremium(CropType _cropType, uint256 _coverageAmount) public pure returns (uint256) {
+        if (_cropType == CropType.Kharif) {
+            return _coverageAmount * 5 / 100; // 5% premium for Kharif crops
+        } else {
+            return _coverageAmount * 3 / 100; // 3% premium for Rabi crops
+        }
+    }
+
+    function purchasePolicy(uint256 _farmerId, uint256 _coverageAmount, CropType _cropType) public payable onlyFarmer(_farmerId) {
+        Farmer storage farmer = farmers[_farmerId];
+        require(farmer.insured == false, "Farmer is already insured");
+
+        uint256 premium = calculatePremium(_cropType, _coverageAmount);
+        require(msg.value >= premium, "Insufficient premium amount");
+
+        policyCount++;
+        uint256 endDate = block.timestamp + 180 days;
+        policies[policyCount] = Policy(policyCount, _farmerId, _coverageAmount, premium, block.timestamp, endDate, true, _cropType);
+
+        farmer.insured = true;
+
+        emit PolicyPurchased(policyCount, _farmerId, _coverageAmount, premium);
+    }
+
+    function claimPayout(uint256 _policyId) public onlyInsurer {
+        Policy storage policy = policies[_policyId];
+        require(policy.active == true, "Policy is not active");
+        require(block.timestamp >= policy.endDate, "Policy period has not ended");
+
+        Farmer storage farmer = farmers[policy.farmerId];
+        uint256 payoutAmount = policy.coverageAmount;
+
+        policy.active = false;
+        farmer.insured = false;
+
+        farmer.wallet.transfer(payoutAmount);
+
+        emit ClaimPaid(_policyId, policy.farmerId, payoutAmount);
+    }
+
+    function getPolicyDetails(uint256 _policyId) public view returns (uint256, uint256, uint256, uint256, uint256, bool, CropType) {
+        Policy storage policy = policies[_policyId];
+        return (policy.id, policy.farmerId, policy.coverageAmount, policy.premium, policy.endDate, policy.active, policy.cropType);
+    }
+
+    function getFarmerDetails(uint256 _farmerId) public view returns (uint256, string memory, address, bool) {
+        Farmer storage farmer = farmers[_farmerId];
+        return (farmer.id, farmer.name, farmer.wallet, farmer.insured);
+    }
+}
